@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 # -------------------------------------------------------------------------
 # CONSTANTES GLOBALES
@@ -64,13 +65,16 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
         else:  # Resto de las compras
             lote /= 2.5 * 1.06
 
+        # Redondear a 2 decimales
+        lote = round(lote, 2)
+
         lotes.append(lote)
 
     precios = [precio for i, precio in enumerate(precios) if i != 22]  # Elimina la compra 23
 
     # Resta 0.5 lotes a la penúltima compra
     if len(lotes) > 1:
-        lotes[-2] -= 0.5
+        lotes[-2] = round(lotes[-2] - 0.5, 2)
 
     # Agrega una compra en p-460 con el mismo lotaje que la penúltima compra
     if len(precios) > 1:
@@ -79,7 +83,7 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
 
     # Vuelve la última compra a 0 lotes
     if len(lotes) > 0:
-        lotes[-1] = 0
+        lotes[-1] = 0.00
 
     # En modo conservador, ajustar la tercera compra (indexada como 2)
     if modo == "conservador" and len(lotes) > 2:
@@ -89,6 +93,14 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
         'Precio': precios,
         'Lotes': lotes
     })
+
+    # Añade una fila en p-360 con 0 lotes sin modificar nada más
+    nueva_fila = pd.DataFrame({'Precio': [precio_inicial - 360], 'Lotes': [0.00]})
+    df = pd.concat([df, nueva_fila], ignore_index=True)
+
+    # Ordena el DataFrame por precio en orden descendente
+    df = df.sort_values(by='Precio', ascending=False).reset_index(drop=True)
+
     return df
 
 def calcular_acumulados(df, precio_inicial, direccion):
@@ -98,6 +110,9 @@ def calcular_acumulados(df, precio_inicial, direccion):
     """
     # Lotes acumulados
     df['Lotes Acumulados'] = df['Lotes'].cumsum()
+
+    # Evitar división por cero
+    df['Lotes Acumulados'].replace(0, np.nan, inplace=True)
 
     # Break-even
     df['Break Even'] = (
@@ -113,20 +128,22 @@ def calcular_acumulados(df, precio_inicial, direccion):
     df['Flotante (%) de un millón'] = (df['Flotante'] / 1_000_000) * 100
 
     # Puntos de salida
-    df['Puntos de salida'] = (
-        abs(df['Precio'] - df['Break Even']) if direccion == "bajada" else df['Break Even'] - df['Precio']
-    )
+    if direccion == "bajada":
+        df['Puntos de salida'] = abs(df['Precio'] - df['Break Even'])
+    else:
+        df['Puntos de salida'] = df['Break Even'] - df['Precio']
 
     # Puntos de salida para ganancias objetivo
-    df['Puntos de salida para 2500'] = (
-        df['Break Even'] + (2500 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
-    )
-    df['Puntos de salida para 5000'] = (
-        df['Break Even'] + (5000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
-    )
-    df['Puntos de salida para 10000'] = (
-        df['Break Even'] + (10000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
-    )
+    with np.errstate(divide='ignore', invalid='ignore'):
+        df['Puntos de salida para 2500'] = (
+            (df['Break Even'] + (2500 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE))) - df['Precio']
+        )
+        df['Puntos de salida para 5000'] = (
+            (df['Break Even'] + (5000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE))) - df['Precio']
+        )
+        df['Puntos de salida para 10000'] = (
+            (df['Break Even'] + (10000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE))) - df['Precio']
+        )
 
     # Ganancia al regresar al precio inicial
     if direccion == "bajada":
@@ -141,6 +158,14 @@ def calcular_acumulados(df, precio_inicial, direccion):
     # Martingala
     df['Martingala'] = df['Lotes'] / df['Lotes'].shift(1)
     df['Martingala'] = df['Martingala'].fillna(1)
+
+    # Redondear columnas numéricas a 2 decimales
+    df_numeric_cols = df.select_dtypes(include=['float', 'int']).columns
+    df[df_numeric_cols] = df[df_numeric_cols].round(2)
+
+    # Reemplazar posibles infinitos y NaN resultantes de divisiones por cero
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.fillna(0, inplace=True)
 
     return df
 
