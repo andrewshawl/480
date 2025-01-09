@@ -15,8 +15,6 @@ UNIDADES_POR_LOTE = 100  # Cada lote equivale a 100 unidades (onzas)
 def generar_precios(precio_inicial, rango_precio, paso, direccion):
     """
     Genera precios en múltiplos de 'paso' desde el precio inicial.
-    - De p-130 hacia abajo, las compras se hacen cada 20 puntos.
-    - De p-280 a p-400, las compras se hacen cada 40 puntos.
     """
     precios = []
     if direccion == "bajada":
@@ -33,25 +31,11 @@ def generar_precios(precio_inicial, rango_precio, paso, direccion):
         precios = [precio_inicial + i * paso for i in range(rango_precio // paso + 1)]
     else:
         raise ValueError("La dirección debe ser 'bajada' o 'subida'.")
-
     return precios
-
 
 def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
     """
     Crea un DataFrame con los precios y los lotes asignados.
-    - Si el precio es p-30 o p+30, asigna 2 lotes.
-    - Si el precio está en p-20, asigna 2.5 lotes.
-    - Si el precio está entre p-40 a p-90 o p+40 a p+90, asigna 1.25 lotes.
-    - Si el precio está entre p-100 a p-120 o p+100 a p+120, asigna 1.5 lotes.
-    - Desde la compra 14 (indexada como 13) en adelante, asigna 1.75 lotes.
-    - En las últimas 3 compras, divide el lotaje adicionalmente por 1.2.
-    - Divide el lotaje entre 2 en las primeras 4 compras y entre 2.4 en las demás.
-    - Elimina la compra 23 (indexada como 22).
-    - Resta 0.5 lotes a la penúltima compra.
-    - Agrega una compra en p-460 con el mismo lotaje que la compra anterior.
-    - Vuelve la última compra a 0 lotes.
-    - En modo conservador, la tercera compra (indexada como 2) será igual a la segunda compra (indexada como 1).
     """
     lotes = []
     for i, precio in enumerate(precios):
@@ -74,11 +58,11 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
 
         # Dividir el lote según la condición
         if i < 4 and precio != precio_inicial - 20:  # Primeras 4 compras, excepto p-20
-            lote /= 2*1.06
+            lote /= 2 * 1.06
         elif i >= len(precios) - 3:  # Últimas 3 compras, ya dividido
-            lote /= 1.6*1.06
+            lote /= 1.6 * 1.06
         else:  # Resto de las compras
-            lote /= 2.5*1.06
+            lote /= 2.5 * 1.06
 
         lotes.append(lote)
 
@@ -107,11 +91,10 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
     })
     return df
 
-
 def calcular_acumulados(df, precio_inicial, direccion):
     """
     Calcula columnas adicionales como lotes acumulados, break-even, flotante,
-    puntos de salida y ganancias objetivo.
+    puntos de salida, ganancias objetivo y porcentaje flotante sobre un millón.
     """
     # Lotes acumulados
     df['Lotes Acumulados'] = df['Lotes'].cumsum()
@@ -126,6 +109,9 @@ def calcular_acumulados(df, precio_inicial, direccion):
         (df['Precio'] - df['Break Even']) * df['Lotes Acumulados'] * UNIDADES_POR_LOTE
     )
 
+    # Porcentaje de flotante sobre un millón
+    df['Flotante (%) de un millón'] = (df['Flotante'] / 1_000_000) * 100
+
     # Puntos de salida
     df['Puntos de salida'] = (
         abs(df['Precio'] - df['Break Even']) if direccion == "bajada" else df['Break Even'] - df['Precio']
@@ -134,6 +120,9 @@ def calcular_acumulados(df, precio_inicial, direccion):
     # Puntos de salida para ganancias objetivo
     df['Puntos de salida para 2500'] = (
         df['Break Even'] + (2500 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
+    )
+    df['Puntos de salida para 5000'] = (
+        df['Break Even'] + (5000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
     )
     df['Puntos de salida para 10000'] = (
         df['Break Even'] + (10000 / (df['Lotes Acumulados'] * UNIDADES_POR_LOTE)) - df['Precio']
@@ -189,5 +178,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
