@@ -85,8 +85,8 @@ def crear_dataframe(precios, lotes_por_compra, precio_inicial, modo):
     if len(lotes) > 0:
         lotes[-1] = 0.00
 
-    # En modo conservador, ajustar la tercera compra (indexada como 2)
-    if modo == "conservador" and len(lotes) > 2:
+    # En "Opción 1", ajustar la tercera compra (indexada como 2)
+    if modo == "Opción 1" and len(lotes) > 2:
         lotes[2] = lotes[1]
 
     df = pd.DataFrame({
@@ -169,6 +169,41 @@ def calcular_acumulados(df, precio_inicial, direccion):
 
     return df
 
+def ajustar_lotajes(df, incremento_inicial, N):
+    """
+    Ajusta los lotajes aumentando los primeros N lotajes y reduciendo los demás
+    para mantener el costo total constante.
+    Luego, resta 0.25 lotes a las primeras compras.
+    """
+    # Calcular el costo total original
+    costo_total_original = (df['Lotes'] * df['Precio']).sum()
+
+    # Aumentar lotajes iniciales
+    df.loc[:N-1, 'Lotes'] *= incremento_inicial
+
+    # Calcular el nuevo costo total después de incrementar lotajes iniciales
+    costo_total_nuevo = (df['Lotes'] * df['Precio']).sum()
+
+    # Calcular el factor de ajuste para igualar el costo total
+    if costo_total_nuevo != 0:
+        factor_ajuste = costo_total_original / costo_total_nuevo
+    else:
+        factor_ajuste = 1
+
+    # Aplicar este factor de ajuste a todos los lotajes
+    df['Lotes'] *= factor_ajuste
+
+    # Restar 0.25 lotes a las primeras N compras
+    df.loc[:N-1, 'Lotes'] -= 0.25
+
+    # Asegurarse de que los lotajes no sean negativos
+    df['Lotes'] = df['Lotes'].clip(lower=0)
+
+    # Redondear lotajes a 2 decimales
+    df['Lotes'] = df['Lotes'].round(2)
+
+    return df
+
 # -------------------------------------------------------------------------
 # APLICACIÓN PRINCIPAL DE STREAMLIT
 # -------------------------------------------------------------------------
@@ -185,7 +220,7 @@ def main():
 
     direccion = st.selectbox("Seleccione la dirección:", ["bajada", "subida"])
 
-    modo = st.selectbox("Seleccione el modo:", ["arriesgado", "conservador"])
+    modo = st.selectbox("Seleccione la opción:", ["Opción 1", "Opción 2", "Opción 3"])
 
     if st.button("Calcular Distribución"):
         # Generar precios
@@ -194,8 +229,34 @@ def main():
         # Crear DataFrame
         df = crear_dataframe(precios, LOTES_POR_COMPRA, precio_inicial, modo)
 
-        # Calcular acumulados
+        # Calcular acumulados antes de ajustar lotajes
         df = calcular_acumulados(df, precio_inicial, direccion)
+
+        # Calcular el flotante original en la compra final
+        precio_final = precio_inicial - 480 if direccion == 'bajada' else precio_inicial + 480
+        flotante_original = (
+            (precio_final - df['Break Even'].iloc[-1]) * df['Lotes Acumulados'].iloc[-1] * UNIDADES_POR_LOTE
+        )
+
+        # Si el modo es "Opción 3", ajustar los lotajes
+        if modo == "Opción 3":
+            incremento_inicial = 2  # Duplicar lotaje inicial
+            N = 5  # Número de compras iniciales a aumentar
+
+            # Ajustar los lotajes manteniendo el costo total constante
+            df = ajustar_lotajes(df, incremento_inicial, N)
+
+            # Recalcular acumulados después de ajustar lotajes
+            df = calcular_acumulados(df, precio_inicial, direccion)
+
+            # Calcular el flotante nuevo en la compra final para verificación
+            flotante_nuevo = (
+                (precio_final - df['Break Even'].iloc[-1]) * df['Lotes Acumulados'].iloc[-1] * UNIDADES_POR_LOTE
+            )
+
+            # Mostrar mensaje si el flotante se mantiene o ajusta
+            diferencia_flotante = flotante_nuevo - flotante_original
+            st.write(f"Diferencia en el flotante de la compra final: {diferencia_flotante:.2f} USD")
 
         # Mostrar resultados
         st.write("### Detalles de las Transacciones")
